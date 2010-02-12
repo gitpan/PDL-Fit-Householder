@@ -3,7 +3,6 @@ abstract: "a pure-PDL linear fitting module that uses the\nHouseholder diagonali
 author:
   - 'David Mertens <mertens2@illinois.edu>'
 build_requires:
-  ExtUtils::CBuilder: 0
   Test::Exception: 0
   Test::LectroTest: 0
   Test::More: 0
@@ -21,4 +20,4 @@ requires:
   version: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: v0.0.1
+version: v0.0.2
