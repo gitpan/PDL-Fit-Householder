@@ -1,0 +1,864 @@
+# The Householder module.
+# This is a stub module, and will (hopefully, some day) be turned
+# into PDL::Fit::Linear, and will include methods besides the
+# Householder method, such as SVD and Givens rotations.
+
+
+############## Version and Documentation ##############
+pp_addpm({At => Top}, <<'INTRO_AND_DOCUMENTATION');
+
+BEGIN { 
+$VERSION = '0.0.1'
+};
+
+use strict;
+use warnings;
+use PDL;
+use Carp 'carp';
+
+# Controls useful error messages:
+our $WARN_ON_UNDEF = 1;
+
+=head1 NAME
+
+PDL::Fit::Householder - a pure-PDL linear fitting module that uses the
+Householder diagonalization technique.
+
+=head1 VERSION
+
+This document describes PDL::Fit::Householder version 0.0.1
+
+=head1 SYNOPSIS
+
+ use PDL;
+ use PDL::Fit::Householder;
+ my $t = sequence(1000) / 50;
+ 
+ # Polynomial fitting needs the order of the polynomial and the
+ # dependent variable:
+ my $data = 0.4 + 5 * $t - 2 * $t**2 + 0.1 * grandom($t);
+ my $coefs = $data->Householder(2, $t);
+ 
+ # Function fitting needs function references and the dependent variable
+ $data = 4 * sin($t) - 7 * cos($t) + 0.2 * exp($t) + 0.1 * grandom($t);
+ my $coefs = $data->Householder(\&PDL::sin, \&PDL::cos, \&PDL::exp, $t);
+ 
+ # Arbitrary data fitting just needs the piddles of data:
+ $signal1 = 2 * sin($t) + 5 * cos($t);
+ $signal2 = $t**2 + grandom($t);
+ $data = 4 * $signal1 - 2 * $signal2;
+ $coefs = $data->Householder($signal1, $signal2);
+ 
+ # All together now!  Notice $t must be at the end:
+ $data = 3 * $signal1 - sin($t) + 2 - 7 * $t + grandom($t);
+ $coefs = $data->Householder($signal1, \&PDL::sin, 2, $t);
+
+For more working examples, try typing at your prompt (once you've
+installed this module):
+
+ perl -MPDL::Demos::Householder -e '1'
+
+=head1 DESCRIPTION
+
+This provides linear least squares fitting using Householder
+transformations, also known as elementary reflectors.  It is written in
+pure PDL, which means that there are no external libraries involved
+(though you will need a compiler in order to install it).
+
+A Householder transformation is an orthogonal transformation. Orthogonal
+transformations have the virtua that, unlike Gaussian elimination, they
+are numerically stable and will not amplify errors in the process of
+solving the system.
+
+This module provides one function meant for public consumption, and two
+internal functions which can be very useful if you need them.  The
+method that you will almost always be using from this package is
+C<Householder>, and the two internal functions are C<_Householder> and
+C<_backsub>.
+
+=head2 Polynomial Fitting
+
+I think polynomial fitting is the simplest use case, so I will start
+with it.  Suppose you have some data, C<$data>, which you get from an
+experiment or something.  For now we'll simulate that experiment by
+creating the data with some noise:
+
+ use PDL::Fit::Householder;
+ my $t = sequence(1000) / 50;
+ my $data = 4 + 5 *$t - 2 * $t**2 + 0.1 * grandom($t);
+
+Now C<$data> is a quadratic function with some noise.  In order to get
+the coefficients, we perform a polynomial fit on the data, specifying
+the order of the polynomial fit (2 in this case) and supplying the
+time-stamp as the last argument.  (The time-stamp, when required, will
+always be the last argument.)  The code to do the fit would look
+something like this:
+
+ my $coefs = $data->Householder(2, $t);
+ print "Got coefficients $coefs\n";
+
+When I run this, I get 
+
+ perldl> p $coefs
+ [ 4.0054492  5.0012631 -2.0001335]
+
+You can fit your data to any order.  Simply specify the order you would
+like to fit.  For example, we can fit our quadratic data to a cubic
+polynomial and see what happens:
+
+ print $coefs = $data->Householder(3, $t);
+ [ 4.0177829  4.9938368 -1.9992038 -3.1020193e-05]
+
+=head2 Arbitrary Function Fitting
+
+Of course, scientists do not fit with just polynomials.  For example,
+let's generate some data involving sine and cosine:
+
+ my $data = 4 * sin($t) -2 * cos($t) + 0.1 * grandom($t);
+ my $coefs = $data->Householder(\&PDL::sin, \&PDL::cos, $t);
+ print "Got coefficients $coefs\n";
+ Got coefficients [   4.00606  -1.997549]
+
+You should notice two things.  First, I still need to supply a
+time-stamp for my data, C<$t>, and it must go at the end of the argument
+list.  Second, I cannot simply use C<sin> and C<cos>, but must qualify
+them as C<PDL::sin> and C<PDL::cos>.  You must do this for all built-in
+Perl functions that have a PDL override, most of which are discussed in
+(the latter part of) L<PDL::Ops>.
+
+You can use your own functions, too.  The only requirement is that when
+given a piddle, they return a piddle with compatible dimensions.  For
+example, suppose we wanted to include the function x^2.5:
+
+ sub super_quadratic {
+     my $values = shift;
+     return $values**2.5;
+ }
+ 
+ $data = 0.5 + 4 * $t - 2 * $t**2 + 7 * super_quadratic($t) + 0.1 * grandom($t);
+ $coefs = $data->Householder(2, \&super_quadratic, $t);
+ print $coefs;
+ [0.48483705  4.0066001 -2.0008957  7.0001342]
+
+=head2 Arbitrary Data Fitting
+
+You may also want to fit one set of experimental data in a linear fashion
+to another set of data.  Under these circumstances, you're trying to
+describe the data in one piddle as a linear combination of the data in
+other piddles.  Let's see an example of that:
+
+ my $signal1 = cos($t) + 0.1 * grandom($t);
+ my $signal2 = sin($t) + 0.1 * grandom($t);
+ my $data = 2.5 * $signal1 + 3.5 * $signal2 + 0.1 * grandom($t);
+ my $coefs = $data->Householder($signal1, $signal2);
+ print $coefs;
+ [ 2.4937939  3.5023191]
+
+Unlike the previous two examples, you don't need to supply a time stamp.
+Time stamps are only necessary when you are trying to fit your data to
+functions.
+
+=head2 Putting it all together
+
+Now we get to the cool part.  You can mix and match all of these just as
+long as you put a time-stamp piddle as the last argument.  Here's an
+example:
+
+ $signal1 = cos($t) + 0.1 * grandom($t);
+ $data = 3 * $signal1 - 0.3 + 2 * $t - 8.9 * $t**2 - 4 * sin($t) + 2 * cos($t) + 0.1 * grandom($t);
+ $coefs = $data->Householder($signal1, 2, \&PDL::sin, \&PDL::cos, $t);
+ print $coefs;
+ [ 3.0247638 -0.30865553    2.00082  -8.899994 -3.9973816  1.9726106]
+
+There's no reason to keep the original order, either (and if it's real
+data, there will be no such thing as 'original order').  Working with
+the exact same data, I get:
+
+ $coefs = $data->Householder(\&PDL::sin, $signal1, \&PDL::cos, 2, $t);
+ print $coefs;
+ [-3.9973816  3.0247638  1.9726106 -0.30865553    2.00082  -8.899994]
+
+which matches the results above, even though the order has changed.
+
+=cut
+INTRO_AND_DOCUMENTATION
+
+# This only matters for CPAN's rendering of the .pd file and does not
+# impact the resulting module file:
+=head1 FUNCTIONS
+=cut
+
+############## Perl Functions ##############
+# The primary publically-usable function as well as utility functions.
+
+# Placing these at the middle will ensure that they come after the
+# =head1 FUNCTIONS pod in the resulting .pm file.  The function pp_addpm
+# defaults to the middle, so this isn't strictly necessary, but I think
+# it's good to be explicity:
+pp_addpm({At => 'Middle'}, <<'HOUSEHOLDER');
+
+=head2 Householder
+
+=for ref
+
+Fits your supplied data to a polynomial, collection of functions,
+or collection of piddles.
+
+Here a basic usage summary:
+
+=for usage
+
+ # The returned value depends on calling context:
+ $coefs = $data->Householder(...)
+ %results = $data->Householder(...)
+ 
+ # The arguments determine what Householder actually does.
+ # Full-blown usage:
+ ... = $data->Householder(ORDER, FUNCREF|PIDDLE, FUNCREF|PIDDLE, ..., $t)
+
+=head3 Arguments
+
+=over
+
+=item ORDER
+
+A scalar.  This specifies the order of the polynomial you would like to
+use to perform the fit; you must specify C<$t> if you specify an order,
+and you must specify only one ORDER in your argument list.
+
+=item FUNCREF
+
+A reference to a function that you want to use in the fit.  All
+functions passed to Householder must accept a single piddle argument
+because the fitting process is going to call C<func($t)> when it runs.
+That also means that you must supply C<$t> if you have any function
+references.
+
+=item PIDDLE
+
+An arbitrary data set that you want to use in the fit.  All piddles
+must have dimensions compatible with C<$data> (and by extension, with
+C<$t>).
+
+=item C<$t>
+
+A collection of times (or more generally, the dependent variable) at
+which the polynomial and/or reference functions will be evaluated in the
+process of performing the fit.  C<$t> must have dimensions compatible
+with C<$data>, and must be the last argument in the list.  You only need
+to supply C<$t> if you indicate a polynomial fit or pass function
+references.
+
+=back
+ 
+Here are some simple examples:
+
+=for example
+
+ # Fit $data to a third-order polynomial:
+ $coefs = $data->Householder(3, $t);
+ # Fit $data to a second order polynomial plus the exponential funtion:
+ $coefs = $data->Householder(2, &exp, $t);
+ 
+ # You expect one signal to be a linear combination of a number of other
+ # signals:
+ $coefs = $data->Householder($signal1, $signal2, $signal3);
+
+All piddles (including the time $t) must have dimensions that are
+compatible with C<$data>.
+
+=cut
+
+sub Householder {
+	my ($data, @args) = @_;
+	
+	# Croak in void context or if $data isn't a piddle
+	barf("Usage: Householder")
+		if (not defined wantarray or ref ($data) !~ /PDL/);
+	
+	# Strip out undefs from the args list while mapping the new list to
+	# the original:
+	my @original_index_for = ('');
+	my $i = 0;
+	my $arg_index = 1;
+
+	while ($i < @args) {
+		if (defined $args[$i]) {
+			$i++;
+			push @original_index_for, $arg_index;
+		}
+		else {
+			splice (@args, $i, 1);
+			carp("Argument $arg_index was undefined in call to Householder")
+				if $WARN_ON_UNDEF;
+		}
+		$arg_index++;
+	}
+	
+	# We need at least one argument after $data:
+	barf("Usage: Householder") if (@args < 1);
+	
+	# The last argument can never be a scalar or a code reference:
+	if(ref ($args[-1]) eq '') {
+		_my_barf("scalar as last defined argument\n"
+		."The presence of a scalar among your arguments means that you intend to\n"
+		."perform a polynomial fit.  However, the dependent variable is assumed\n"
+		."to be the last item in your list, so you cannot indicate the order of\n"
+		."your fit with your final argument.", $original_index_for[-1]);
+	}
+	elsif(ref ($args[-1]) =~ /CODE/) {
+		_my_barf("function reference as last defined argument\n"
+		."The presence of a function reference among your arguments means that\n"
+		."you intend to fit your data to the supplied function.  However, the\n"
+		."dependent variable is assumed to be the last item in your list, so you\n"
+		."cannot supply an anonymous function as your final argument."
+		, $original_index_for[-1]);
+	}
+	
+	my ($t, $poly_order, @stuff_to_fit);
+
+	### Process each argument in @args ###
+	
+	ARGUMENT: for ($arg_index = 1; @args; $arg_index++) {
+		my $arg = shift @args;
+
+		# First see if we've got a scalar:
+		if (not ref $arg) {
+			# Make sure we've not already set up a polynomial fit:
+			if (defined $poly_order) {
+				_my_barf("multiple scalars\n"
+				."When you supply a scalar to the fit, you indicate that you want to perform\n"
+				."a linear fit of the given order, but you seem to have supplied two scalars."
+				, $original_index_for[$arg_index]);
+			}
+
+			# save the polynomial order and make sure it's valid:
+			$poly_order = +$arg;
+			(my $digits) = ($arg =~ /(\d+)/);
+			if ($poly_order != $digits) {
+				_my_barf("negative or non-integer order\n"
+				."When you supply a scalar to the fit, you indicate that you want to perform\n"
+				."a linear fit of the given order.  For the current implementation, the\n"
+				."order must be an integer greater than or equal to zero.  For negative\n"
+				."or non-integer exponents, use an anonymous sub with the desired exponent:\n"
+				.'  $data->Householder(3, sub {$_[0]**(-2.3)}, $t);'."\n"
+				."That will fit your data to a third-order polynomial and t^-2.3"
+				, $original_index_for[$arg_index]);
+			}
+			
+			# Add polynomial orders to @stuff_to_fit in ascending order
+			for (my $i = 0; $i <= $poly_order; $i++) {
+				push (@stuff_to_fit, $i);
+			}
+			
+			# Get the time from the end of @args
+			unless (defined $t) {
+				$t = pop @args;
+				_check_piddle($data, $t, $original_index_for[-1]);
+			}
+		}
+
+		# Next check for a code reference
+		elsif (ref ($arg) =~ /CODE/) {
+			push @stuff_to_fit, $arg;
+			my $results;
+			eval { $results = &$arg($data) };
+			if ($@) {
+				_my_barf("Function reference must be able to process piddles."
+					, $original_index_for[$arg_index]);
+			}
+			eval { cat($results, $data) };
+			if ($@) {
+				_my_barf("\nFunction reference must return a piddle with dimensions compatible to its input"
+					, $original_index_for[$arg_index]);
+			}
+
+			# Get the time from the end of @args
+			unless (defined $t) {
+				$t = pop @args;
+				_check_piddle($data, $t, $original_index_for[-1]);
+			}
+		}
+
+		# Next check for a piddle reference
+		elsif (ref ($arg) =~ /PDL/) {
+			_check_piddle($data, $arg, $original_index_for[$arg_index]);
+			push @stuff_to_fit, $arg;
+		}
+		
+		# They've exhausted their options, so barf:
+		else {
+			_my_barf("Must be a scalar, function reference, or piddle."
+				, $original_index_for[$arg_index]);
+		}
+	}
+	
+	### Build matrix and copy data for fitting ###
+	my @piddles_to_fit;
+	foreach(@stuff_to_fit) {
+		if (not ref) {
+			push @piddles_to_fit, $t ** $_;
+		}
+		elsif (ref ($_) =~ /CODE/) {
+			push @piddles_to_fit, &$_($t);
+		}
+		elsif (ref ($_) =~ /PDL/) {
+			push @piddles_to_fit, $_;
+		}
+	}
+	my $A = cat(@piddles_to_fit)->transpose;
+	my $y = $data->copy->dummy(0);
+
+	$y->_Householder($A);
+	my $coefs = $y->_backsub($A)->squeeze;
+	
+	# Eventually return coefficients, residual, method, etc if requested
+	return $coefs if (defined wantarray and not wantarray);
+	my ($residual);
+	return (
+		coefs => $coefs,
+		residual => $residual,
+		method => 'Householder',
+		diagonalized_matrix => $A,
+		manipulated_results => $y,
+	) if (wantarray);
+	
+}
+
+sub _my_barf {
+	my ($message, $arg_index) = @_;
+	$message = "incorrect usage of function PDL::Fit::Householder\n"
+		."Error with argument $arg_index: $message";
+	barf($message);
+}
+
+# Utility function that makes sure the supplied $t piddle is good.
+# Barfs if it finds trouble.
+sub _check_piddle {
+	my ($data, $piddle, $arg_index) = @_;
+	# Make sure $piddle is a piddle
+	if (not defined $piddle) {
+		_my_barf("Expected a piddle but got undef.", $arg_index);
+	}
+	elsif (ref ($piddle) !~ /PDL/) {
+		_my_barf("Expected a piddle but got something else.", $arg_index);
+	}
+	# Make sure the dimensions are compatible
+	eval { cat($data, $piddle) };
+	if ($@) {
+		_my_barf("Piddle has incompatible dimensions.", $arg_index);
+	}
+}
+
+# add Householder as a PDL object method
+*PDL::Householder = \&Householder;
+
+HOUSEHOLDER
+
+pp_add_exported('Householder');
+
+
+############## PDL::PP Functions ##############
+
+=head2 _Householder
+
+=cut
+
+# _Householder
+pp_def('_Householder',
+	Pars => 'y(i, m); A(n, m); [t]v(m);',
+	Doc => <<'HOUSEHOLDER_DOC',
+=for ref
+
+Internal routine that upper-triangularizes a matrix using the
+Householder method.
+
+In the process of diagonalizing C<$A>, this function WILL MODIFY both
+C<$A> and C<$y>, so don't pass it variables that you intend to use
+afterwards!
+
+I would like to add code to process bad values in C<$y> that will simply
+get skipped if found.  But I haven't implemented it yet.  Also, I'm not
+sure what to do about bad values in C<$A>, though I could simply skip
+them, too.  Suggestions would be appreciated.
+
+Here's a simple example:
+
+=for example
+
+ # you must build $y and $A ahead of time
+ $y->_Householder($A);
+ my $coefs = $y->_backsub($A);
+
+=cut
+HOUSEHOLDER_DOC
+
+	Code => q{
+		double alpha, beta, gamma;
+		int j, k;
+		int M = $SIZE(m);
+		int N = $SIZE(n);
+		threadloop %{
+		loop(i) %{
+			/* Note n is the number of columns, so n < m for this to work */
+			loop(n) %{
+				/* Compute alpha and build v */
+				alpha = 0;
+				for (j = n; j < M; j++) {
+					alpha += $A(m => j) * $A(m => j);
+					$v(m => j) = $A(m => j);
+				}
+				alpha = sqrt(alpha);
+				if ($A(m => n) > 0)
+					alpha = -alpha;
+				$v(m => n) -= alpha;
+				
+				beta = 0;
+				for (j = n; j < M; j++) {
+					beta += $v(m => j) * $v(m => j);
+				}
+				
+				if (beta != 0) {
+					// apply the Householder transformation to the
+					// remaining submatrix, column j, row k
+					for (j = n; j < N; j++) {
+						// Get the dot product of v and the jth
+						// column of the submatrix, called gamma:
+						gamma = 0;
+						for (k = n; k < M; k++)
+							gamma += $v(m => k) * $A(n => j, m => k);
+						// now subtract a scaled version of v, based
+						// on gamma, from the submatrix's jth
+						// column:
+						for (k = n; k < M; k++)
+							$A(n => j, m => k) -= 2 * gamma / beta * $v(m => k);
+					}
+					
+					// apply the Householder transformation to y
+					// Get the dot product of v and y:
+					gamma = 0;
+					for (k = n; k < M; k++)
+						gamma += $v(m => k) * $y(m => k);
+					
+					// subtract a scaled copy of v from y
+					for (k = n; k < M; k++) {
+						$y(m => k) -= (2 * gamma / beta) * $v(m => k);
+					}
+				}
+			%}
+		%}
+		%}
+	},
+);
+
+=head2 _backsub
+
+=cut
+
+pp_def('_backsub',
+	Pars => 'y(i, m); A(n, m); [o]coefs(i, n);',
+	Doc => <<'BACKSUB_DOC',
+=for ref
+
+Internal routine that performs the back-substitution necessary for
+solving triangularized systems.
+
+Once you have triangularized your C<$A> matrix using C<_Householder>,
+use this method to extract the coefficients.
+
+Here's a simple example:
+
+=for example
+
+ # you must build $y and $A ahead of time
+ $y->_Householder($A);
+ my $coefs = $y->_backsub($A);
+
+=cut
+BACKSUB_DOC
+	Code => q{
+		int j, k;
+		double tmp;
+		int N = $SIZE(n);
+		threadloop %{
+		loop (i) %{
+			// Remember, n is the number of columns and must be
+			// less than or equal to m.  Start at the lowest-right
+			// diagonal entry:
+			for (j = N-1; j > -1; j--) {
+				tmp = $y(m => j);
+				for (k = N-1; k > j; k--) {
+					tmp -= $A(n => k, m => j) * $coefs(n => k);
+				}
+				$coefs(n => j) = tmp / $A(n => j, m => j);
+			}
+		%}
+		%}
+	},
+);
+
+
+pp_addpm(<<'DEBUG_FUNCTIONS');
+
+=head2 PDL::Fit::Householder::warn_on_undef
+
+=head2 PDL::Fit::Householder::no_warn_on_undef
+
+Determines whether or not warnings are given when you supply an
+undefined value to the Householder function.  Warnings are on by
+default.
+
+=cut
+
+sub warn_on_undef {	$WARN_ON_UNDEF = 1 }
+sub no_warn_on_undef { $WARN_ON_UNDEF = 0 }
+
+DEBUG_FUNCTIONS
+
+
+pp_addpm({At => 'Bot'}, <<'FINAL_DOCUMENTATION');
+
+=head1 DIAGNOSTICS
+
+You can receive a number of complaints from C<PDL::Fit::Householder>.
+Most of these complaints are fatal, but some are not.  At the moment
+the only complaints that are not fatal involve warnings for undefined
+arguments.  These warnings are turned on by default; to turn them off,
+set C<$PDL::Fit::Householder::WARN_ON_UNDEF> to a false value.
+
+You will get a general usage error when you attempt to call
+C<PDL::Fit::Householder> (1) in void context, (2) with too few arguments,
+or (3) on anything that is not a piddle.  Here are some examples of
+these errors:
+
+ $data->Householder($series1, $series2);     # BAD - void context
+ $coefs = $data->Householder();              # BAD - too few arguments
+ $coefs = PDL::Fit::Householder(5, $data);   # BAD - first argument not
+                                             #       a piddle
+
+You also might slip-up if you call the function on the class using the
+arrow operator, even if the 'first' argument is the piddle you meant:
+
+ $coefs = PDL::Fit->Householder($data, $series1); # BAD - first argument
+                                                  #       not a piddle
+
+Other errors typically begin with:
+
+ PDL: incorrect usage of function PDL::Fit::Householder
+ Error with argument $arg_index: <short-message>
+ <Long-Message>
+
+I hope that the messages are self-explnatory.  If they give you trouble,
+the list that follows, keyed by short-message, will hopefully explain
+your error in more detail:
+
+=over
+
+
+=item * Expected piddle but got undef
+
+You should never get this error due to the way that the
+function processes undefined values.  If you do, please report this as
+a bug and submit the code that caused it.
+
+=item * Expected a piddle but got something else
+
+You inadvertenly supplied a non-piddle where
+C<PDL::Fit::Householder> was expecting a piddle.  This can pretty much
+only happen when you are doing a polynomial and/or function fit and you
+inadvertently have a strange value at the end of your argument list.
+For example, if you pass your dependent variable in an anonymous array
+or an array reference, you'll get this error.  Here's a second-order
+polynomial fit that would cause this error:
+
+ $coefs = $data->Householder(2, [$t]);  # BAD - don't wrap anything in []
+
+=item * function reference as last defined argument
+
+You got this error either because you put the dependent variable in the
+wrong place (it should always be the last argument) or your dependent
+variable is inadvertently undefined (in which case you should also get
+a warning about its undefinedness).
+
+ # out-of-order (assumes that $t is defined):
+ $coefs = $data->Householder($sequence1, $t, \&PDL::sin);  # BAD
+ $coefs = $data->Householder($sequence1, \&PDL::sin, $t);  # GOOD
+ 
+ # undefined dependent variable
+ my $t;
+ $coefs = $data->Householder(\&PDL::sin, \&PDL::cos, $t);
+
+=item * Function reference must be able to process piddles
+
+The function that you passed to C<PDL::Fit::Householder> choked on a
+piddle.  The likeliest problem here is that you tried to use a Perl
+stock function, like C<sin> or C<cos>.  PDL overrides these functions,
+and you must explicitly name them:
+
+ $coefs = $data->Householder(\&sin, \&cos, $t);            # BAD
+ $coefs = $data->Householder(\&PDL::sin, \&PDL::cos, $t);  # GOOD
+
+Of course, this problem could crop-up with your own functions that croak
+when something bad happens.  For example, if your function expects more
+than one argument, and dies if it doesn't get what it wants, you would
+get this error.  All function references should work when they are given
+only a single piddle argument to chew on.
+
+=item * Function reference must return a piddle with dimensions compatible
+to its input
+
+This error indicates that the anonymous function or function you passed
+by reference either does not return a piddle or returns a piddle whose
+dimensions are not compatible (in a PDL threading sense) with the
+input.  Put simply, your function should return a piddle with identical
+dimensions to those of the piddle supplied to it.  You might have this
+error if your function returns a slice or if your function returns a
+pure number.
+
+=item * multiple scalars
+
+You should give at most one scalar in your list of arguments, and that
+one scalar represents the order of the polynomial you would like to fit
+to your data.  You will get this error if you inadvertently supply more
+than one scalar, which may indicate a mistaken function reference or
+a piddle that somehow got collapsed to a scalar value.
+
+This could also happen if you make two mistakes: not properly
+referencing a function which is a Perl function that PDL overrides.
+First, you must properly reference your functions.  Second, you must
+fully qualify functions like C<sin> and C<cos> as C<PDL::sin> and
+C<PDL::cos>:
+
+ # BAD polynomial + sin fit:
+ $coefs = $data->Householder(2, sin, $t);
+ # STILL BAD polynomial + sin fit, though you'll get a different error
+ $coefs = $data->Householder(2, \&sin, $t);
+ # GOOD polynomial + sin fit:
+ $coefs = $data->Householder(2, \&PDL::sin, $t);
+ 
+ # BAD sin + cos fit:
+ $coefs = $data->Householder(sin, cos, $t);
+ # STILL BAD sin + cos fit, though you'll get a different error:
+ $coefs = $data->Householder(\&sin, \&cos, $t);
+ # GOOD sin + cos fit:
+ $coefs = $data->Householder(\&PDL::sin, \&PDL::cos, $t);
+
+=item * Must be a scalar, function reference, or piddle
+
+The argument in question is not a scalar, function reference, or piddle.
+This could happen if you manage to pass an anonymous array or hash, or
+of you pass in an object.
+
+=item * negative or non-integer order
+
+At the moment, polynomial fits only expect non-negative integer orders.
+So if you provide a scalar for a polynomial fit, be sure it's an
+integer:
+
+ $coefs = $data->Householder(3.2, $t);  # BAD - must be an integer
+ $coefs = $data->Householder(-3, $t);   # BAD - must be non-negative
+ $coefs = $data->Householder(3, $t);    # GOOD - non-negative integer
+
+This could also happen if you make the double-mistake of attempting to
+supply a fit function without properly escaping it.  For example, here
+you attempt to fit your data to a sine function, but you accidentally
+call it C<sin> instead of the proper C<\&PDL::sin>:
+
+ $_ = 2;
+ $coefs = $data->Householder(sin, $t);
+ # That call gets interpreted as
+ $coefs = $data->Householder(sin(2), $t);
+
+The resulting function call gets interpreted as a request for a
+polynomial fit with order C<sin(2)>.
+
+=item * Piddle has incompatible dimensions
+
+You properly supplied a piddle, but its dimensions are not compatible
+with your data's dimensions.  For example, C<sequence(3)> and
+C<sequence(5)> would give piddles with incompatible dimensions.
+
+=item * scalar as last defined argument
+
+You will get this warning in one of three circumstances.
+
+The first case is that you want to perform a polynomial fit and you
+accidentally put the desired order of that fit at the end of your
+argument list.  Always put your dependent variable at the end of your
+argument list:
+
+ $coefs = $data->Householder($t, 2);  # BAD
+ $coefs = $data->Householder(2, $t);  # GOOD
+
+The second case that would give you this error is that your dependent
+variable is undefined and the second-to-last argument is the order of
+your desired polynomial fit.  For example:
+
+ $t;  # Oops, forgot to define $t...
+ $coefs = $data->Householder(2, $t);  # Error 
+
+The final case is that you not only supplied an undefined dependent
+variable, but you also inadvertently called a function instead of
+supplying its reference:
+
+ $t;  # Oops, forgot to define $t...
+ $coefs = $data->Householder(sin, $t);
+ # You meant to say this:
+ $coefs = $data->Householder(\&PDL::sin, $t);
+
+However, in the last line above, you will still get an error, but this
+time it will be that the last argument is a function reference.
+
+=back
+
+=head1 TODO
+
+The module does not provide any means for easily generating data from
+the fits, nor does it provide any measure for how well or poorly the
+fit describes the data.
+
+I would like to add other methods and provide a way to indicate the
+desired method when you call a general function C<fit>.
+
+Extend the module so that it can detect other implementations, like GSL
+or Slatec bindings, and offer the same interface to them.
+
+=head1 AUTHOR
+
+David Mertens  C<< <mertens2@illinois.edu> >>
+
+=head1 LICENCE AND COPYRIGHT
+
+Copyright (c) 2010, David Mertens C<< <mertens2@illinois.edu> >>. All rights reserved.
+
+This module is free software; you can redistribute it and/or
+modify it under the same terms as Perl itself. See L<perlartistic>.
+
+
+=head1 DISCLAIMER OF WARRANTY
+
+BECAUSE THIS SOFTWARE IS LICENSED FREE OF CHARGE, THERE IS NO WARRANTY
+FOR THE SOFTWARE, TO THE EXTENT PERMITTED BY APPLICABLE LAW. EXCEPT WHEN
+OTHERWISE STATED IN WRITING THE COPYRIGHT HOLDERS AND/OR OTHER PARTIES
+PROVIDE THE SOFTWARE "AS IS" WITHOUT WARRANTY OF ANY KIND, EITHER
+EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE
+ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE SOFTWARE IS WITH
+YOU. SHOULD THE SOFTWARE PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL
+NECESSARY SERVICING, REPAIR, OR CORRECTION.
+
+IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
+WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MAY MODIFY AND/OR
+REDISTRIBUTE THE SOFTWARE AS PERMITTED BY THE ABOVE LICENCE, BE
+LIABLE TO YOU FOR DAMAGES, INCLUDING ANY GENERAL, SPECIAL, INCIDENTAL,
+OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE USE OR INABILITY TO USE
+THE SOFTWARE (INCLUDING BUT NOT LIMITED TO LOSS OF DATA OR DATA BEING
+RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD PARTIES OR A
+FAILURE OF THE SOFTWARE TO OPERATE WITH ANY OTHER SOFTWARE), EVEN IF
+SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGES.
+
+
+=cut
+
+FINAL_DOCUMENTATION

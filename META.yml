@@ -1,0 +1,24 @@
+---
+abstract: "a pure-PDL linear fitting module that uses the\nHouseholder diagonalization technique."
+author:
+  - 'David Mertens <mertens2@illinois.edu>'
+build_requires:
+  ExtUtils::CBuilder: 0
+  Test::Exception: 0
+  Test::LectroTest: 0
+  Test::More: 0
+  Test::Warn: 0
+configure_requires:
+  Module::Build: 0.36
+generated_by: 'Module::Build version 0.3603'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: PDL-Fit-Householder
+requires:
+  PDL: 0
+  version: 0
+resources:
+  license: http://dev.perl.org/licenses/
+version: v0.0.1
